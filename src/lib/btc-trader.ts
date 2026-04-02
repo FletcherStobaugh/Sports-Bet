@@ -85,6 +85,8 @@ export interface KalshiBTCMarket {
   volume: number;
   open_interest: number;
   close_time: string;
+  open_time?: string;
+  is_open: boolean;
   bracketLow: number;
   bracketHigh: number;
 }
@@ -106,10 +108,11 @@ export async function findBTCMarkets(): Promise<KalshiBTCMarket[]> {
       const openTime = m.open_time || "";
       const closeTime = m.close_time || "";
 
-      // Skip markets that haven't opened yet
-      if (openTime && new Date(openTime).getTime() > Date.now()) continue;
-      // Skip already closed markets
+      // Skip already closed/settled markets
       if (closeTime && new Date(closeTime).getTime() < Date.now()) continue;
+
+      // Track if market is currently open for trading
+      const isOpen = !openTime || new Date(openTime).getTime() <= Date.now();
 
       // Parse bracket from floor_strike or ticker
       let bracketLow = 0;
@@ -146,6 +149,8 @@ export async function findBTCMarkets(): Promise<KalshiBTCMarket[]> {
         volume: parseInt(m.volume_dollars || String(m.volume || 0)) || 0,
         open_interest: parseInt(m.open_interest_fp || String(m.open_interest || 0)) || 0,
         close_time: closeTime,
+        open_time: openTime,
+        is_open: isOpen,
         bracketLow,
         bracketHigh,
       });

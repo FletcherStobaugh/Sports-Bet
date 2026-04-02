@@ -46,20 +46,32 @@ async function main() {
     return;
   }
 
-  console.log(`Found ${markets.length} BTC bracket markets\n`);
+  const openMarkets = markets.filter((m) => m.is_open);
+  const upcomingMarkets = markets.filter((m) => !m.is_open);
+
+  console.log(`Found ${markets.length} BTC markets (${openMarkets.length} open, ${upcomingMarkets.length} upcoming)\n`);
+
   // Show markets with prices
-  for (const m of markets.slice(0, 25)) {
+  const displayMarkets = openMarkets.length > 0 ? openMarkets : markets;
+  for (const m of displayMarkets.slice(0, 25)) {
     const bracket =
       m.bracketLow > 0 && m.bracketHigh < Infinity
         ? `$${m.bracketLow.toLocaleString()} - $${m.bracketHigh.toLocaleString()}`
         : m.bracketLow > 0
           ? `Above $${m.bracketLow.toLocaleString()}`
           : `Below $${m.bracketHigh.toLocaleString()}`;
+    const status = m.is_open ? "OPEN" : `opens ${m.open_time?.slice(0, 16)}`;
     console.log(
-      `  [${m.ticker}] ${bracket.padEnd(30)} yes: ${m.yes_bid}/${m.yes_ask}¢ | no: ${m.no_bid}/${m.no_ask}¢ | vol: ${m.volume}`
+      `  [${m.ticker}] ${bracket.padEnd(30)} yes: ${m.yes_bid}/${m.yes_ask}¢ | no: ${m.no_bid}/${m.no_ask}¢ | ${status}`
     );
   }
-  if (markets.length > 25) console.log(`  ... and ${markets.length - 25} more`);
+  if (displayMarkets.length > 25) console.log(`  ... and ${displayMarkets.length - 25} more`);
+
+  if (openMarkets.length === 0) {
+    console.log(`\nNo currently open BTC markets. Next markets open at: ${upcomingMarkets[0]?.open_time}`);
+    console.log("The bot will trade when markets are open (runs every 4 hours via cron).");
+    return;
+  }
 
   // 3. Generate signals
   console.log("\n=== STEP 3: Trade Signals ===\n");
