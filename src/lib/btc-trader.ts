@@ -103,51 +103,49 @@ export async function findBTCMarkets(): Promise<KalshiBTCMarket[]> {
 
     for (const m of markets) {
       const ticker = m.ticker || "";
-      const title = m.title || "";
+      const openTime = m.open_time || "";
+      const closeTime = m.close_time || "";
 
-      // Parse bracket bounds from ticker
-      // Format: KXBTC-26APR0400-T75299.99 (above $75,299.99)
-      //         KXBTC-26APR0400-B75250   (below $75,250)
-      //         or range brackets
+      // Skip markets that haven't opened yet
+      if (openTime && new Date(openTime).getTime() > Date.now()) continue;
+      // Skip already closed markets
+      if (closeTime && new Date(closeTime).getTime() < Date.now()) continue;
+
+      // Parse bracket from floor_strike or ticker
       let bracketLow = 0;
       let bracketHigh = Infinity;
+      const floorStrike = m.floor_strike ?? 0;
 
-      // Try "T" threshold (above X)
-      const aboveMatch = ticker.match(/-T([\d.]+)$/);
-      if (aboveMatch) {
-        bracketLow = parseFloat(aboveMatch[1]);
-        bracketHigh = Infinity;
-      }
-
-      // Try "B" threshold (below X)
+      // Ticker: KXBTC-26APR0400-B75250 (below) or -T56700 (above)
       const belowMatch = ticker.match(/-B([\d.]+)$/);
+      const aboveMatch = ticker.match(/-T([\d.]+)$/);
+
       if (belowMatch) {
         bracketHigh = parseFloat(belowMatch[1]);
-        bracketLow = 0;
+      } else if (aboveMatch) {
+        bracketLow = parseFloat(aboveMatch[1]);
+      } else if (floorStrike > 0) {
+        bracketLow = floorStrike;
       }
 
-      // Parse from title if ticker parsing fails
-      if (bracketLow === 0 && bracketHigh === Infinity) {
-        // "Bitcoin price range on Apr 4, 2026?" with subtitle showing range
-        const rangeMatch = title.match(/\$([\d,]+(?:\.\d+)?)\s*(?:to|-)\s*\$([\d,]+(?:\.\d+)?)/i);
-        if (rangeMatch) {
-          bracketLow = parseFloat(rangeMatch[1].replace(/,/g, ""));
-          bracketHigh = parseFloat(rangeMatch[2].replace(/,/g, ""));
-        }
-      }
+      // Parse prices — API returns dollar strings with _dollars suffix
+      const yesBid = parseFloat(m.yes_bid_dollars || String(m.yes_bid || 0));
+      const yesAsk = parseFloat(m.yes_ask_dollars || String(m.yes_ask || 0));
+      const noBid = parseFloat(m.no_bid_dollars || String(m.no_bid || 0));
+      const noAsk = parseFloat(m.no_ask_dollars || String(m.no_ask || 0));
 
       allMarkets.push({
         ticker,
-        title,
-        subtitle: m.subtitle || m.yes_sub_title || "",
+        title: m.title || "",
+        subtitle: m.subtitle || m.yes_sub_title || m.no_sub_title || "",
         event_ticker: m.event_ticker || "",
-        yes_bid: m.yes_bid ?? 0,
-        yes_ask: m.yes_ask ?? 0,
-        no_bid: m.no_bid ?? 0,
-        no_ask: m.no_ask ?? 0,
-        volume: m.volume ?? 0,
-        open_interest: m.open_interest ?? 0,
-        close_time: m.close_time || "",
+        yes_bid: Math.round(yesBid * 100),
+        yes_ask: Math.round(yesAsk * 100),
+        no_bid: Math.round(noBid * 100),
+        no_ask: Math.round(noAsk * 100),
+        volume: parseInt(m.volume_dollars || String(m.volume || 0)) || 0,
+        open_interest: parseInt(m.open_interest_fp || String(m.open_interest || 0)) || 0,
+        close_time: closeTime,
         bracketLow,
         bracketHigh,
       });
