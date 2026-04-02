@@ -1,0 +1,21 @@
+name: Debug Kalshi Markets
+
+on:
+  workflow_dispatch:
+
+jobs:
+  list-markets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: List Kalshi NBA markets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+        run: npx tsx scripts/list-kalshi-markets.ts
