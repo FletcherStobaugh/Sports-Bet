@@ -18,7 +18,9 @@ jobs:
         run: npm ci
       - name: Install Playwright browsers
         run: npx playwright install chromium
-      - name: Run pipeline
+      - name: Run full pipeline (scrape + analyze + bet)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
         run: npx tsx scripts/run-pipeline.ts all

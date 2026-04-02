@@ -132,6 +132,22 @@ async function resolve() {
   }
 }
 
+async function bet() {
+  console.log("=== AUTO-BETTING ON KALSHI ===");
+  try {
+    const { autoBet } = await import("../src/lib/bettor");
+    const result = await autoBet();
+    for (const d of result.details) console.log(`  ${d}`);
+    await logRun("bet", "success", result.betsPlaced);
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("Auto-bet failed:", msg);
+    await logRun("bet", "error", 0, msg);
+    throw err;
+  }
+}
+
 // Main
 const command = process.argv[2] || "all";
 
@@ -146,12 +162,16 @@ const command = process.argv[2] || "all";
     case "resolve":
       await resolve();
       break;
+    case "bet":
+      await bet();
+      break;
     case "all":
       await scrape();
       await analyze();
+      await bet();
       break;
     default:
-      console.error(`Unknown command: ${command}. Use: scrape, analyze, resolve, all`);
+      console.error(`Unknown command: ${command}. Use: scrape, analyze, resolve, bet, all`);
       process.exit(1);
   }
   console.log("Done!");

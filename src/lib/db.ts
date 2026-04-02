@@ -73,4 +73,26 @@ export async function initDB() {
   await db`CREATE INDEX IF NOT EXISTS idx_analyses_verdict ON analyses(verdict)`;
   await db`CREATE INDEX IF NOT EXISTS idx_props_date ON props(date)`;
   await db`CREATE INDEX IF NOT EXISTS idx_pipeline_runs_type ON pipeline_runs(job_type)`;
+
+  await db`
+    CREATE TABLE IF NOT EXISTS kalshi_bets (
+      id SERIAL PRIMARY KEY,
+      analysis_id INTEGER REFERENCES analyses(id),
+      market_ticker TEXT NOT NULL,
+      market_title TEXT NOT NULL,
+      order_id TEXT,
+      side TEXT NOT NULL,
+      contracts INTEGER NOT NULL,
+      price_cents INTEGER NOT NULL,
+      cost_cents INTEGER NOT NULL,
+      status TEXT DEFAULT 'PLACED',
+      pnl_cents INTEGER,
+      settled_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(analysis_id, market_ticker)
+    )
+  `;
+
+  await db`CREATE INDEX IF NOT EXISTS idx_kalshi_bets_status ON kalshi_bets(status)`;
+  await db`CREATE INDEX IF NOT EXISTS idx_kalshi_bets_date ON kalshi_bets(created_at)`;
 }

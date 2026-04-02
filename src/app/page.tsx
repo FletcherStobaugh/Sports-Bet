@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { PropCard } from "@/components/PropCard";
 import { PipelineStatusBar } from "@/components/PipelineStatus";
+import { KalshiPortfolio } from "@/components/KalshiPortfolio";
 import type { DBAnalysis, PipelineStatus, Verdict } from "@/lib/types";
 
 type VerdictFilter = Verdict | "all";
@@ -48,6 +49,9 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
       {/* Pipeline Status */}
       {pipeline && <PipelineStatusBar status={pipeline} />}
+
+      {/* Kalshi Portfolio */}
+      <KalshiPortfolio />
 
       {/* Header */}
       <div className="flex items-end justify-between">
