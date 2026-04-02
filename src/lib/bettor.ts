@@ -181,7 +181,7 @@ export async function autoBet(): Promise<{
     return { betsPlaced: 0, totalCost: 0, skipped: analyses.length, errors: 1, details };
   }
 
-  if (balance.balance < MIN_BET_CENTS) {
+  if (balance.balance < MAX_BET_CENTS) {
     details.push("Insufficient balance for any bets");
     return { betsPlaced: 0, totalCost: 0, skipped: analyses.length, errors: 0, details };
   }
