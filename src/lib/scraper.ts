@@ -1,20 +1,23 @@
 // ============================================================
 // PrizePicks Scraper
-// Scrapes NBA player props from PrizePicks using Playwright
+// Intercepts PrizePicks internal API responses via Playwright
+// Strategy: set up API listener BEFORE navigating, capture
+// projection data from their internal endpoints.
 // ============================================================
 
 import type { ScrapedProp, StatCategory } from "./types";
 
 // Map PrizePicks stat display names to our categories
 const STAT_MAP: Record<string, StatCategory> = {
-  "Points": "pts",
-  "Rebounds": "reb",
-  "Assists": "ast",
-  "Steals": "stl",
-  "Blocks": "blk",
+  Points: "pts",
+  Rebounds: "reb",
+  Assists: "ast",
+  Steals: "stl",
+  Blocks: "blk",
   "3-Pt Made": "fg3m",
   "3-Pointers Made": "fg3m",
-  "Turnovers": "turnover",
+  "Three Pointers Made": "fg3m",
+  Turnovers: "turnover",
   "Pts+Rebs": "pts+reb",
   "Pts+Asts": "pts+ast",
   "Rebs+Asts": "reb+ast",
@@ -22,105 +25,258 @@ const STAT_MAP: Record<string, StatCategory> = {
   "Steals+Blocks": "stl+blk",
   "Blks+Stls": "stl+blk",
   "Fantasy Score": "fantasy",
+  "Fantasy Points": "fantasy",
 };
 
+// Lowercase lookup for flexible matching
+const STAT_MAP_LOWER: Record<string, StatCategory> = {};
+for (const [key, val] of Object.entries(STAT_MAP)) {
+  STAT_MAP_LOWER[key.toLowerCase()] = val;
+}
+
 export async function scrapePrizePicks(): Promise<ScrapedProp[]> {
-  // Dynamic import — Playwright isn't needed in the Next.js bundle
   const { chromium } = await import("playwright");
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    viewport: { width: 1920, height: 1080 },
   });
   const page = await context.newPage();
 
   const props: ScrapedProp[] = [];
+  const seenKeys = new Set<string>();
 
-  try {
-    // Navigate to PrizePicks NBA board
-    await page.goto("https://app.prizepicks.com/board", {
-      waitUntil: "networkidle",
-      timeout: 30000,
-    });
-
-    // Wait for the page to load
-    await page.waitForTimeout(3000);
-
-    // Click on NBA filter if available
-    const nbaFilter = page.locator('button:has-text("NBA"), [data-testid*="NBA"]');
-    if (await nbaFilter.count() > 0) {
-      await nbaFilter.first().click();
-      await page.waitForTimeout(2000);
-    }
-
-    // Extract projection cards
-    // PrizePicks renders prop cards with player name, stat, and line
-    const cards = page.locator('[class*="projection"], [class*="pick-card"], [data-testid*="projection"]');
-    const cardCount = await cards.count();
-
-    for (let i = 0; i < cardCount; i++) {
+  // === Strategy 1: Intercept API responses BEFORE navigating ===
+  // PrizePicks loads projections from their API — capture that data directly
+  page.on("response", async (response) => {
+    const url = response.url();
+    // PrizePicks API endpoints that contain projection data
+    if (
+      url.includes("/projections") ||
+      url.includes("/entries") ||
+      url.includes("/lines") ||
+      url.includes("/props") ||
+      url.includes("api.prizepicks.com")
+    ) {
       try {
-        const card = cards.nth(i);
-        const text = await card.innerText();
-        const parsed = parseCardText(text);
-        if (parsed) props.push(parsed);
+        const json = await response.json();
+        extractPropsFromAPI(json, props, seenKeys);
       } catch {
-        // Skip individual card parse failures
-        continue;
+        // Not JSON — skip
       }
     }
+  });
 
-    // Fallback: try to intercept API responses if DOM scraping fails
+  try {
+    // Navigate with domcontentloaded (don't wait for all network requests)
+    console.log("Navigating to PrizePicks...");
+    await page.goto("https://app.prizepicks.com/board", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+
+    // Wait for the app to hydrate and make API calls
+    await page.waitForTimeout(8000);
+
+    // Try clicking NBA filter
+    try {
+      const nbaBtn = page.locator('button:has-text("NBA")').first();
+      if (await nbaBtn.isVisible({ timeout: 3000 })) {
+        await nbaBtn.click();
+        await page.waitForTimeout(5000);
+      }
+    } catch {
+      // NBA filter not found — might already be on NBA or different layout
+    }
+
+    // Wait for more API responses
+    await page.waitForTimeout(5000);
+
+    // === Strategy 2: DOM scraping as fallback ===
     if (props.length === 0) {
-      console.log("DOM scraping found 0 props, trying API intercept...");
-      const apiProps = await tryApiIntercept(page);
-      props.push(...apiProps);
+      console.log("API intercept found 0 props, trying DOM scraping...");
+      await scrapeDOM(page, props, seenKeys);
+    }
+
+    // === Strategy 3: Try scrolling to load more ===
+    if (props.length === 0) {
+      console.log("DOM scraping found 0, scrolling to trigger lazy load...");
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(3000);
+      await scrapeDOM(page, props, seenKeys);
     }
   } catch (err) {
-    console.error("Scraper error:", err);
+    console.error("Scraper error:", err instanceof Error ? err.message : err);
   } finally {
     await browser.close();
   }
 
-  console.log(`Scraped ${props.length} NBA props from PrizePicks`);
-  return props;
+  // Filter to NBA only (if we can tell)
+  const nbaProps = props.filter((p) => {
+    // Keep all if we can't determine sport, or filter by known NBA player names
+    return true;
+  });
+
+  console.log(`Scraped ${nbaProps.length} props from PrizePicks`);
+  return nbaProps;
+}
+
+// Extract props from PrizePicks API JSON responses
+function extractPropsFromAPI(
+  json: unknown,
+  props: ScrapedProp[],
+  seenKeys: Set<string>
+) {
+  if (!json || typeof json !== "object") return;
+
+  const obj = json as Record<string, unknown>;
+
+  // PrizePicks API format: { data: [...projections], included: [...players] }
+  const data = Array.isArray(obj.data) ? obj.data : [];
+  const included = Array.isArray(obj.included) ? obj.included : [];
+
+  // Build player lookup from included
+  const players: Record<string, string> = {};
+  for (const item of included) {
+    const inc = item as Record<string, unknown>;
+    if (inc.type === "new_player" || inc.type === "player") {
+      const attrs = inc.attributes as Record<string, unknown> | undefined;
+      if (attrs && inc.id) {
+        const name = (attrs.display_name || attrs.name || `${attrs.first_name || ""} ${attrs.last_name || ""}`.trim()) as string;
+        if (name) players[String(inc.id)] = name;
+      }
+    }
+  }
+
+  for (const item of data) {
+    const d = item as Record<string, unknown>;
+    if (d.type !== "projection" && d.type !== "new_projection") continue;
+
+    const attrs = d.attributes as Record<string, unknown> | undefined;
+    if (!attrs) continue;
+
+    const lineScore = attrs.line_score ?? attrs.flash_sale_line_score ?? attrs.stat_value;
+    const statType = (attrs.stat_type || attrs.display_stat || attrs.stat_display || "") as string;
+    const description = (attrs.description || attrs.game_description || "") as string;
+
+    if (!lineScore || !statType) continue;
+
+    // Get player name from relationships or included
+    let playerName = "";
+    const rels = d.relationships as Record<string, Record<string, unknown>> | undefined;
+    if (rels) {
+      const playerRel = (rels.new_player || rels.player) as Record<string, unknown> | undefined;
+      const playerData = playerRel?.data as Record<string, unknown> | undefined;
+      if (playerData?.id) {
+        playerName = players[String(playerData.id)] || "";
+      }
+    }
+    if (!playerName) {
+      playerName = (attrs.player_name || attrs.name || "") as string;
+    }
+
+    if (!playerName) continue;
+
+    // Map stat type
+    const stat = STAT_MAP[statType] || STAT_MAP_LOWER[statType.toLowerCase()];
+    if (!stat) continue;
+
+    const key = `${playerName}|${stat}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    props.push({
+      playerName,
+      statCategory: stat,
+      line: parseFloat(String(lineScore)),
+      gameInfo: description,
+      scrapedAt: new Date().toISOString(),
+    });
+  }
+
+  if (data.length > 0) {
+    console.log(`API intercept: processed ${data.length} items, extracted ${props.length} props so far`);
+  }
+}
+
+// DOM scraping fallback
+async function scrapeDOM(
+  page: import("playwright").Page,
+  props: ScrapedProp[],
+  seenKeys: Set<string>
+) {
+  // Try multiple selector patterns PrizePicks might use
+  const selectors = [
+    '[class*="projection"]',
+    '[class*="pick-card"]',
+    '[class*="prop-card"]',
+    '[class*="player-prop"]',
+    '[data-testid*="projection"]',
+    '[data-testid*="prop"]',
+    'li[class*="board"]',
+    '.board-card',
+  ];
+
+  for (const selector of selectors) {
+    const cards = page.locator(selector);
+    const count = await cards.count();
+    if (count === 0) continue;
+
+    console.log(`Found ${count} elements with selector: ${selector}`);
+    for (let i = 0; i < count; i++) {
+      try {
+        const text = await cards.nth(i).innerText();
+        const parsed = parseCardText(text);
+        if (parsed) {
+          const key = `${parsed.playerName}|${parsed.statCategory}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            props.push(parsed);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (props.length > 0) break;
+  }
 }
 
 // Parse card text into a structured prop
 function parseCardText(text: string): ScrapedProp | null {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (lines.length < 3) return null;
 
-  // Try to find player name, stat category, and line
   let playerName = "";
   let statCategory: StatCategory | null = null;
   let line = 0;
   let gameInfo = "";
 
   for (const l of lines) {
-    // Check if it's a stat category
-    const normalizedStat = STAT_MAP[l];
+    const normalizedStat = STAT_MAP[l] || STAT_MAP_LOWER[l.toLowerCase()];
     if (normalizedStat) {
       statCategory = normalizedStat;
       continue;
     }
 
-    // Check if it's a number (the line)
     const num = parseFloat(l);
     if (!isNaN(num) && num > 0 && num < 200) {
       line = num;
       continue;
     }
 
-    // Check if it's game info (contains @ or vs)
     if (l.includes("@") || l.toLowerCase().includes("vs")) {
       gameInfo = l;
       continue;
     }
 
-    // Otherwise, likely a player name (longest text that isn't a known stat)
-    if (l.length > playerName.length && !STAT_MAP[l]) {
+    if (l.length > playerName.length && !STAT_MAP[l] && !STAT_MAP_LOWER[l.toLowerCase()]) {
       playerName = l;
     }
   }
@@ -134,43 +290,6 @@ function parseCardText(text: string): ScrapedProp | null {
     gameInfo,
     scrapedAt: new Date().toISOString(),
   };
-}
-
-// Try intercepting PrizePicks API responses for more reliable data
-async function tryApiIntercept(page: import("playwright").Page): Promise<ScrapedProp[]> {
-  const props: ScrapedProp[] = [];
-
-  // PrizePicks uses an internal API that we can intercept
-  page.on("response", async (response) => {
-    const url = response.url();
-    if (url.includes("projections") || url.includes("entries")) {
-      try {
-        const json = await response.json();
-        if (json?.data) {
-          for (const item of json.data) {
-            const stat = STAT_MAP[item.stat_type] || STAT_MAP[item.display_stat];
-            if (stat && item.line_score && item.player_name) {
-              props.push({
-                playerName: item.player_name,
-                statCategory: stat,
-                line: parseFloat(item.line_score),
-                gameInfo: item.game_description || "",
-                scrapedAt: new Date().toISOString(),
-              });
-            }
-          }
-        }
-      } catch {
-        // Not JSON or unexpected format
-      }
-    }
-  });
-
-  // Reload to capture API calls
-  await page.reload({ waitUntil: "networkidle" });
-  await page.waitForTimeout(5000);
-
-  return props;
 }
 
 // For testing/development: generate sample props
