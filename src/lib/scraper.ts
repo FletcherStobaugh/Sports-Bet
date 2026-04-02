@@ -80,6 +80,38 @@ export async function scrapePrizePicks(): Promise<ScrapedProp[]> {
     // Wait for the app to hydrate and make API calls
     await page.waitForTimeout(8000);
 
+    // Debug: log page title and screenshot
+    const title = await page.title();
+    console.log(`Page title: ${title}`);
+    console.log(`Page URL: ${page.url()}`);
+    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || "(empty)");
+    console.log(`Page body preview: ${bodyText.substring(0, 300)}`);
+
+    // Try dismissing any popups/modals (age gate, cookie consent, etc.)
+    const dismissSelectors = [
+      'button:has-text("I am 21")',
+      'button:has-text("I agree")',
+      'button:has-text("Accept")',
+      'button:has-text("Close")',
+      'button:has-text("OK")',
+      'button:has-text("Got it")',
+      '[class*="close"]',
+      '[class*="dismiss"]',
+      '[aria-label="Close"]',
+    ];
+    for (const sel of dismissSelectors) {
+      try {
+        const btn = page.locator(sel).first();
+        if (await btn.isVisible({ timeout: 1000 })) {
+          await btn.click();
+          console.log(`Dismissed popup: ${sel}`);
+          await page.waitForTimeout(2000);
+        }
+      } catch {
+        // Not found — continue
+      }
+    }
+
     // Try clicking NBA filter
     try {
       const nbaBtn = page.locator('button:has-text("NBA")').first();
