@@ -2,30 +2,23 @@ name: Daily Pipeline
 
 on:
   schedule:
-    # Run at 7:00 PM UTC (2:00 PM ET) — before most NBA games
     - cron: "0 19 * * *"
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
 
 jobs:
   scrape-and-analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install dependencies
         run: npm ci
-
       - name: Install Playwright browsers
         run: npx playwright install chromium
-
-      - name: Run pipeline (scrape + analyze)
+      - name: Run pipeline
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
         run: npx tsx scripts/run-pipeline.ts all

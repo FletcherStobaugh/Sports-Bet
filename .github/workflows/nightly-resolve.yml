@@ -2,27 +2,21 @@ name: Nightly Resolve
 
 on:
   schedule:
-    # Run at 6:00 AM UTC (1:00 AM ET) — after most NBA games finish
     - cron: "0 6 * * *"
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
 
 jobs:
   resolve-bets:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install dependencies
         run: npm ci
-
       - name: Resolve pending bets
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          BDL_API_KEY: ${{ secrets.BDL_API_KEY }}
         run: npx tsx scripts/run-pipeline.ts resolve
