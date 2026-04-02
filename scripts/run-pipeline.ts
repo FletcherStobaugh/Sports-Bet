@@ -1,10 +1,12 @@
-// Run: npx tsx scripts/run-pipeline.ts [scrape|analyze|resolve|all]
+// Run: npx tsx scripts/run-pipeline.ts [analyze|bet|resolve|all]
 // Entry point for GitHub Actions pipeline jobs
+// Kalshi-only — no PrizePicks scraping
 
 import { neon } from "@neondatabase/serverless";
-import { scrapePrizePicks, generateSampleProps } from "../src/lib/scraper";
+import { generateSampleProps } from "../src/lib/scraper";
 import { analyzeAllProps } from "../src/lib/analyzer";
 import { resolveBets } from "../src/lib/resolver";
+import { autoBet } from "../src/lib/bettor";
 import type { ScrapedProp } from "../src/lib/types";
 
 const sql = neon(process.env.DATABASE_URL!);
@@ -16,62 +18,13 @@ async function logRun(jobType: string, status: string, items: number, error?: st
   `;
 }
 
-async function scrape() {
-  console.log("=== SCRAPING PRIZEPICKS ===");
-  try {
-    const props = await scrapePrizePicks();
-    if (props.length === 0) {
-      console.log("No NBA props found. Trying sample data for dev...");
-      const sample = generateSampleProps();
-      await saveProps(sample);
-      await logRun("scrape", "success", sample.length);
-      return sample;
-    }
-    await saveProps(props);
-    await logRun("scrape", "success", props.length);
-    return props;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("Scrape failed:", msg);
-    await logRun("scrape", "error", 0, msg);
-    // Fall back to sample data
-    const sample = generateSampleProps();
-    await saveProps(sample);
-    return sample;
-  }
-}
-
-async function saveProps(props: ScrapedProp[]) {
-  for (const p of props) {
-    await sql`
-      INSERT INTO props (player_name, stat_category, line, game_info, scraped_at)
-      VALUES (${p.playerName}, ${p.statCategory}, ${p.line}, ${p.gameInfo}, ${p.scrapedAt})
-      ON CONFLICT (player_name, stat_category, date) DO UPDATE
-      SET line = ${p.line}, game_info = ${p.gameInfo}, scraped_at = ${p.scrapedAt}
-    `;
-  }
-  console.log(`Saved ${props.length} props to DB`);
-}
-
 async function analyze() {
   console.log("=== RUNNING ANALYSIS ===");
   const today = new Date().toISOString().split("T")[0];
 
-  const dbProps = await sql`SELECT * FROM props WHERE date = ${today}`;
-  let propsToAnalyze: ScrapedProp[];
-
-  if (dbProps.length > 0) {
-    propsToAnalyze = dbProps.map((p) => ({
-      playerName: p.player_name as string,
-      statCategory: p.stat_category as ScrapedProp["statCategory"],
-      line: p.line as number,
-      gameInfo: p.game_info as string,
-      scrapedAt: p.scraped_at as string,
-    }));
-  } else {
-    console.log("No props in DB for today, using sample data");
-    propsToAnalyze = generateSampleProps();
-  }
+  // Use sample props (top NBA players) — Kalshi market matching handles the rest
+  const propsToAnalyze = generateSampleProps();
+  console.log(`Analyzing ${propsToAnalyze.length} player props...`);
 
   try {
     const analyses = await analyzeAllProps(propsToAnalyze);
@@ -115,6 +68,21 @@ async function analyze() {
   }
 }
 
+async function bet() {
+  console.log("=== AUTO-BETTING ON KALSHI ===");
+  try {
+    const result = await autoBet();
+    for (const d of result.details) console.log(`  ${d}`);
+    await logRun("bet", "success", result.betsPlaced);
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("Auto-bet failed:", msg);
+    await logRun("bet", "error", 0, msg);
+    throw err;
+  }
+}
+
 async function resolve() {
   console.log("=== RESOLVING BETS ===");
   try {
@@ -132,46 +100,26 @@ async function resolve() {
   }
 }
 
-async function bet() {
-  console.log("=== AUTO-BETTING ON KALSHI ===");
-  try {
-    const { autoBet } = await import("../src/lib/bettor");
-    const result = await autoBet();
-    for (const d of result.details) console.log(`  ${d}`);
-    await logRun("bet", "success", result.betsPlaced);
-    return result;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("Auto-bet failed:", msg);
-    await logRun("bet", "error", 0, msg);
-    throw err;
-  }
-}
-
 // Main
 const command = process.argv[2] || "all";
 
 (async () => {
   switch (command) {
-    case "scrape":
-      await scrape();
-      break;
     case "analyze":
       await analyze();
-      break;
-    case "resolve":
-      await resolve();
       break;
     case "bet":
       await bet();
       break;
+    case "resolve":
+      await resolve();
+      break;
     case "all":
-      await scrape();
       await analyze();
       await bet();
       break;
     default:
-      console.error(`Unknown command: ${command}. Use: scrape, analyze, resolve, bet, all`);
+      console.error(`Unknown command: ${command}. Use: analyze, bet, resolve, all`);
       process.exit(1);
   }
   console.log("Done!");
