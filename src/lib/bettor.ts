@@ -15,10 +15,8 @@ import {
 import type { DBAnalysis, Verdict } from "./types";
 
 // --- Risk Config ---
-const MAX_BET_PERCENT = 0.05; // Max 5% of bankroll per bet
-const MIN_BET_CENTS = 100; // Minimum $1 bet
+const MAX_BET_CENTS = 100; // Hard cap: $1 per bet (testing mode)
 const MAX_DAILY_BETS = 5; // Cap daily bets
-const ONLY_STRONG = true; // Only bet on STRONG verdicts
 const MAX_PRICE_CENTS = 75; // Don't buy contracts priced above 75¢ (implied 75% prob)
 const MIN_EDGE_THRESHOLD = 0.10; // Need at least 10% gap between our hit rate and market price
 
@@ -115,22 +113,16 @@ function calculateBetSize(
   edgePercent: number,
   priceCents: number
 ): number {
-  // Kelly criterion (half-Kelly for safety)
-  // f = (bp - q) / b where b = (100/price - 1), p = our prob, q = 1 - p
-  const b = (100 / priceCents) - 1;
-  const p = edgePercent + priceCents / 100; // our estimated probability
-  const q = 1 - p;
-  const kelly = Math.max(0, (b * p - q) / b);
-  const halfKelly = kelly / 2;
+  // Hard cap at MAX_BET_CENTS (testing mode: $1)
+  // Buy as many contracts as fit within the cap
+  const contracts = Math.floor(MAX_BET_CENTS / priceCents);
 
-  // Cap at MAX_BET_PERCENT of bankroll
-  const maxBet = Math.floor(balanceCents * MAX_BET_PERCENT);
-  const betAmount = Math.min(Math.floor(balanceCents * halfKelly), maxBet);
+  // Make sure we can afford it
+  if (contracts * priceCents > balanceCents) {
+    return Math.floor(balanceCents / priceCents);
+  }
 
-  // Convert to number of contracts
-  const contracts = Math.floor(betAmount / priceCents);
-
-  return Math.max(contracts >= 1 ? contracts : 0, 0);
+  return Math.max(contracts, 0);
 }
 
 // --- Main Auto-Bet Function ---
