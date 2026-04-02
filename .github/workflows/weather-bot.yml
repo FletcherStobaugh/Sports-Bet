@@ -2,28 +2,28 @@ name: Trading Bot
 
 on:
   schedule:
-    # Run every 4 hours — BTC markets are 24/7
-    - cron: "0 2,6,10,14,18,22 * * *"
+    # Arb scanner runs every hour (arbs appear and close fast)
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Bot mode: scan, dry-run, or trade"
+        description: "Bot mode: scan or trade"
         required: true
-        default: "dry-run"
+        default: "scan"
         type: choice
         options:
           - scan
-          - dry-run
           - trade
       bot:
         description: "Which bot to run"
         required: true
-        default: "btc"
+        default: "arb"
         type: choice
         options:
+          - arb
           - btc
           - weather
-          - both
+          - all
 
 jobs:
   trade:
@@ -36,23 +36,23 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm ci
-      - name: Debug Kalshi prices
-        if: ${{ github.event.inputs.mode == 'scan' }}
+      - name: Run Arb Scanner
+        if: ${{ github.event.inputs.bot == 'arb' || github.event.inputs.bot == 'all' || github.event.inputs.bot == '' }}
         env:
           KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
-        run: npx tsx scripts/debug-kalshi-prices.ts
+        run: npx tsx scripts/run-arb-scanner.ts ${{ github.event.inputs.mode || 'scan' }}
       - name: Run BTC bot
-        if: ${{ github.event.inputs.bot != 'weather' }}
+        if: ${{ github.event.inputs.bot == 'btc' || github.event.inputs.bot == 'all' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
-        run: npx tsx scripts/run-btc-bot.ts ${{ github.event.inputs.mode || 'trade' }}
+        run: npx tsx scripts/run-btc-bot.ts ${{ github.event.inputs.mode || 'scan' }}
       - name: Run Weather bot
-        if: ${{ github.event.inputs.bot == 'weather' || github.event.inputs.bot == 'both' }}
+        if: ${{ github.event.inputs.bot == 'weather' || github.event.inputs.bot == 'all' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
-        run: npx tsx scripts/run-weather-bot.ts ${{ github.event.inputs.mode || 'trade' }}
+        run: npx tsx scripts/run-weather-bot.ts ${{ github.event.inputs.mode || 'scan' }}
