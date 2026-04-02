@@ -23,7 +23,7 @@ function formatStatCategory(cat: string): string {
   return labels[cat] || cat;
 }
 
-export function PropCard({ analysis }: { analysis: DBAnalysis }) {
+export function PropCard({ analysis, rank }: { analysis: DBAnalysis; rank?: number }) {
   const a = analysis;
   const hitPctL10 = Math.round(a.hit_rate_l10 * 100);
   const hitPctL20 = Math.round(a.hit_rate_l20 * 100);
@@ -39,11 +39,16 @@ export function PropCard({ analysis }: { analysis: DBAnalysis }) {
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 transition-colors">
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
-        <div>
+        <div className="flex items-start gap-3">
+          {rank && (
+            <span className="text-2xl font-mono font-bold text-zinc-600">#{rank}</span>
+          )}
+          <div>
           <h3 className="text-lg font-bold text-white">{a.player_name}</h3>
           <p className="text-sm text-zinc-400">
             {formatStatCategory(a.stat_category)} — {a.game_info}
           </p>
+          </div>
         </div>
         <div className="text-right">
           <div className="text-2xl font-mono font-bold text-white">{a.line}</div>
