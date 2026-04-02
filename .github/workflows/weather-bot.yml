@@ -36,6 +36,12 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm ci
+      - name: Debug Kalshi prices
+        if: ${{ github.event.inputs.mode == 'scan' }}
+        env:
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+        run: npx tsx scripts/debug-kalshi-prices.ts
       - name: Run BTC bot
         if: ${{ github.event.inputs.bot != 'weather' }}
         env:
