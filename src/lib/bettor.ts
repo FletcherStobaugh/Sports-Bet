@@ -172,7 +172,7 @@ export async function autoBet(): Promise<{
   }
 
   // 3. Get balance
-  let balance: { balance: number; payout: number };
+  let balance: { balance: number };
   try {
     balance = await getBalance();
     details.push(`Kalshi balance: $${(balance.balance / 100).toFixed(2)}`);

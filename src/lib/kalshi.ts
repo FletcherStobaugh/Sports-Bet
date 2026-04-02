@@ -1,75 +1,30 @@
 // ============================================================
-// Kalshi API Client
-// Handles auth, market discovery, and order placement
-// Docs: https://trading-api.readme.io/reference
+// Kalshi API Client — using official kalshi-typescript SDK
 // ============================================================
 
-import jwt from "jsonwebtoken";
-import crypto from "crypto";
+import { Configuration, MarketApi, OrdersApi, PortfolioApi, EventsApi } from "kalshi-typescript";
 
-const KALSHI_API_BASE = "https://api.elections.kalshi.com/trade-api/v2";
-
-// --- Auth ---
-
-function generateToken(): string {
+function getConfig(): Configuration {
   const apiKey = process.env.KALSHI_API_KEY;
-  const privateKeyPem = process.env.KALSHI_PRIVATE_KEY;
+  const privateKey = process.env.KALSHI_PRIVATE_KEY;
 
-  if (!apiKey || !privateKeyPem) {
+  if (!apiKey || !privateKey) {
     throw new Error("KALSHI_API_KEY and KALSHI_PRIVATE_KEY must be set");
   }
 
-  // Kalshi uses RSA-signed JWTs for API auth
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    sub: apiKey,
-    iat: now,
-    exp: now + 300, // 5 minute expiry
-  };
-
-  return jwt.sign(payload, privateKeyPem, { algorithm: "RS256" });
-}
-
-async function kalshiFetch<T>(
-  path: string,
-  options: { method?: string; body?: unknown; params?: Record<string, string> } = {}
-): Promise<T> {
-  const url = new URL(`${KALSHI_API_BASE}${path}`);
-  if (options.params) {
-    for (const [k, v] of Object.entries(options.params)) {
-      url.searchParams.set(k, v);
-    }
-  }
-
-  const token = generateToken();
-  const res = await fetch(url.toString(), {
-    method: options.method || "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+  return new Configuration({
+    apiKey,
+    privateKeyPem: privateKey,
+    basePath: "https://api.elections.kalshi.com/trade-api/v2",
   });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Kalshi API ${res.status}: ${errText}`);
-  }
-
-  return res.json();
 }
 
 // --- Account ---
 
-export interface KalshiBalance {
-  balance: number; // in cents
-  payout: number;
-}
-
-export async function getBalance(): Promise<KalshiBalance> {
-  const data = await kalshiFetch<{ balance: number; payout: number }>("/portfolio/balance");
-  return data;
+export async function getBalance(): Promise<{ balance: number }> {
+  const api = new PortfolioApi(getConfig());
+  const res = await api.getBalance();
+  return { balance: res.data.balance };
 }
 
 // --- Markets ---
@@ -94,57 +49,48 @@ export interface KalshiMarket {
   no_sub_title: string;
 }
 
-export interface KalshiEvent {
-  event_ticker: string;
-  title: string;
-  category: string;
-  markets: KalshiMarket[];
-}
-
-// Get markets for NBA/sports
 export async function getNBAMarkets(): Promise<KalshiMarket[]> {
-  // Search for NBA-related markets
-  const data = await kalshiFetch<{ markets: KalshiMarket[]; cursor: string }>("/markets", {
-    params: {
-      limit: "200",
-      status: "open",
-      // Kalshi categorizes sports markets — search for NBA
-      series_ticker: "NBA",
-    },
-  });
+  const api = new MarketApi(getConfig());
 
-  return data.markets || [];
+  // Try to get NBA series markets
+  try {
+    const res = await api.getMarkets(200, undefined, undefined, "KXNBA", undefined, undefined, undefined, undefined, undefined, undefined, undefined, "open");
+    return (res.data.markets || []) as unknown as KalshiMarket[];
+  } catch {
+    // Fallback: search broader sports markets
+  }
+
+  // Try broader search
+  try {
+    const res = await api.getMarkets(200, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, "open");
+    const markets = (res.data.markets || []) as unknown as KalshiMarket[];
+    // Filter for NBA/sports
+    return markets.filter((m) => {
+      const t = (m.title || "").toLowerCase();
+      return t.includes("nba") || t.includes("points") || t.includes("rebounds") || t.includes("assists");
+    });
+  } catch (err) {
+    console.error("Failed to fetch markets:", err instanceof Error ? err.message : err);
+    return [];
+  }
 }
 
-// Search markets by text
 export async function searchMarkets(query: string): Promise<KalshiMarket[]> {
-  const data = await kalshiFetch<{ markets: KalshiMarket[]; cursor: string }>("/markets", {
-    params: {
-      limit: "100",
-      status: "open",
-    },
-  });
-
-  // Filter by query text
+  const api = new MarketApi(getConfig());
+  const res = await api.getMarkets(200, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, "open");
   const q = query.toLowerCase();
-  return (data.markets || []).filter(
+  return ((res.data.markets || []) as unknown as KalshiMarket[]).filter(
     (m) =>
-      m.title.toLowerCase().includes(q) ||
-      m.subtitle?.toLowerCase().includes(q) ||
-      m.ticker.toLowerCase().includes(q)
+      (m.title || "").toLowerCase().includes(q) ||
+      (m.subtitle || "").toLowerCase().includes(q) ||
+      (m.ticker || "").toLowerCase().includes(q)
   );
 }
 
-// Get a specific event with all its markets
-export async function getEvent(eventTicker: string): Promise<KalshiEvent> {
-  const data = await kalshiFetch<{ event: KalshiEvent }>(`/events/${eventTicker}`);
-  return data.event;
-}
-
-// Get a specific market
 export async function getMarket(ticker: string): Promise<KalshiMarket> {
-  const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${ticker}`);
-  return data.market;
+  const api = new MarketApi(getConfig());
+  const res = await api.getMarket(ticker);
+  return res.data.market as unknown as KalshiMarket;
 }
 
 // --- Orders ---
@@ -161,91 +107,45 @@ export interface KalshiOrder {
   created_time: string;
 }
 
-export interface PlaceOrderParams {
+export async function placeOrder(params: {
   ticker: string;
-  side: "yes" | "no"; // yes = over, no = under (typically)
-  count: number; // number of contracts
+  side: "yes" | "no";
+  count: number;
   type: "market" | "limit";
-  yes_price?: number; // limit price in cents (1-99)
+  yes_price?: number;
   no_price?: number;
-}
+}): Promise<KalshiOrder> {
+  const api = new OrdersApi(getConfig());
 
-export async function placeOrder(params: PlaceOrderParams): Promise<KalshiOrder> {
-  const body: Record<string, unknown> = {
+  const orderReq: {
+    ticker: string;
+    action: "buy";
+    side: "yes" | "no";
+    count: number;
+    yes_price?: number;
+    no_price?: number;
+    buy_max_cost?: number;
+  } = {
     ticker: params.ticker,
     action: "buy",
     side: params.side,
     count: params.count,
-    type: params.type,
   };
 
   if (params.type === "limit") {
-    if (params.side === "yes" && params.yes_price) {
-      body.yes_price = params.yes_price;
-    } else if (params.side === "no" && params.no_price) {
-      body.no_price = params.no_price;
-    }
+    if (params.side === "yes" && params.yes_price) orderReq.yes_price = params.yes_price;
+    if (params.side === "no" && params.no_price) orderReq.no_price = params.no_price;
+  } else {
+    // Market order: set buy_max_cost high enough to fill
+    orderReq.buy_max_cost = params.count * 99; // max possible cost
   }
 
-  const data = await kalshiFetch<{ order: KalshiOrder }>("/portfolio/orders", {
-    method: "POST",
-    body,
-  });
-
-  return data.order;
+  const res = await api.createOrder(orderReq);
+  return res.data.order as unknown as KalshiOrder;
 }
 
-// Get open orders
-export async function getOpenOrders(): Promise<KalshiOrder[]> {
-  const data = await kalshiFetch<{ orders: KalshiOrder[] }>("/portfolio/orders", {
-    params: { status: "resting" },
-  });
-  return data.orders || [];
-}
-
-// Get positions
-export interface KalshiPosition {
-  ticker: string;
-  market_exposure: number;
-  resting_orders_count: number;
-  total_traded: number;
-  realized_pnl: number;
-  fees_paid: number;
-}
-
-export async function getPositions(): Promise<KalshiPosition[]> {
-  const data = await kalshiFetch<{ market_positions: KalshiPosition[] }>("/portfolio/positions");
-  return data.market_positions || [];
-}
-
-// --- Convenience: Find NBA player prop market ---
-
-export async function findPlayerPropMarket(
-  playerName: string,
-  statCategory: string
-): Promise<KalshiMarket | null> {
-  // Kalshi market titles typically look like:
-  // "Will Nikola Jokic score 25+ points?" or "Jokic Over 25.5 Points"
-  const searchTerms = [
-    playerName.split(" ").pop() || playerName, // Last name
-    statCategory === "pts" ? "points" :
-    statCategory === "reb" ? "rebounds" :
-    statCategory === "ast" ? "assists" :
-    statCategory === "fg3m" ? "threes" :
-    statCategory,
-  ];
-
-  const markets = await searchMarkets(searchTerms[0]);
-  const statTerm = searchTerms[1].toLowerCase();
-
-  // Find a market matching both player and stat
-  const match = markets.find((m) => {
-    const title = m.title.toLowerCase();
-    return (
-      title.includes(searchTerms[0].toLowerCase()) &&
-      (title.includes(statTerm) || title.includes(statCategory))
-    );
-  });
-
-  return match || null;
+export async function getPositions(): Promise<unknown[]> {
+  const api = new PortfolioApi(getConfig());
+  const res = await api.getPositions();
+  return res.data.market_positions || [];
 }
