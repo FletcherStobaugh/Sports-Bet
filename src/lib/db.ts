@@ -95,4 +95,51 @@ export async function initDB() {
 
   await db`CREATE INDEX IF NOT EXISTS idx_kalshi_bets_status ON kalshi_bets(status)`;
   await db`CREATE INDEX IF NOT EXISTS idx_kalshi_bets_date ON kalshi_bets(created_at)`;
+
+  // Weather bot tables
+  await db`
+    CREATE TABLE IF NOT EXISTS weather_trades (
+      id SERIAL PRIMARY KEY,
+      city TEXT NOT NULL,
+      target_date DATE NOT NULL,
+      bracket TEXT NOT NULL,
+      market_ticker TEXT NOT NULL,
+      side TEXT NOT NULL,
+      our_probability REAL NOT NULL,
+      market_price REAL NOT NULL,
+      edge REAL NOT NULL,
+      kelly_fraction REAL NOT NULL,
+      contracts INTEGER NOT NULL,
+      limit_price_cents INTEGER NOT NULL,
+      cost_cents INTEGER NOT NULL,
+      order_id TEXT,
+      status TEXT DEFAULT 'PLACED',
+      pnl_cents INTEGER,
+      actual_temp REAL,
+      settled_at TIMESTAMPTZ,
+      reasoning TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(market_ticker, target_date)
+    )
+  `;
+
+  await db`CREATE INDEX IF NOT EXISTS idx_weather_trades_date ON weather_trades(target_date)`;
+  await db`CREATE INDEX IF NOT EXISTS idx_weather_trades_status ON weather_trades(status)`;
+
+  await db`
+    CREATE TABLE IF NOT EXISTS weather_forecasts (
+      id SERIAL PRIMARY KEY,
+      city TEXT NOT NULL,
+      target_date DATE NOT NULL,
+      ensemble_mean REAL NOT NULL,
+      ensemble_median REAL NOT NULL,
+      ensemble_min REAL NOT NULL,
+      ensemble_max REAL NOT NULL,
+      ensemble_std REAL NOT NULL,
+      ensemble_count INTEGER NOT NULL,
+      high_temps JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(city, target_date)
+    )
+  `;
 }

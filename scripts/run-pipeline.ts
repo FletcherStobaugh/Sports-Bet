@@ -2,8 +2,8 @@
 // Entry point for GitHub Actions pipeline jobs
 
 import { neon } from "@neondatabase/serverless";
+import { scrapePrizePicks } from "../src/lib/prizepicks-scraper";
 import { fetchPlayerProps } from "../src/lib/odds-api";
-import { generateSampleProps } from "../src/lib/scraper";
 import { analyzeAllProps } from "../src/lib/analyzer";
 import { resolveBets } from "../src/lib/resolver";
 import type { ScrapedProp } from "../src/lib/types";
@@ -19,19 +19,38 @@ async function logRun(jobType: string, status: string, items: number, error?: st
 
 async function scrape() {
   console.log("=== FETCHING PLAYER PROPS ===");
+
+  // Try PrizePicks first (actual lines), fall back to Odds API
+  try {
+    console.log("Attempting PrizePicks scrape...");
+    const props = await scrapePrizePicks();
+    if (props.length > 0) {
+      await saveProps(props);
+      await logRun("scrape", "success", props.length, undefined);
+      console.log(`Got ${props.length} props from PrizePicks`);
+      return props;
+    }
+    console.log("PrizePicks returned 0 props — falling back to Odds API");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("PrizePicks scrape failed:", msg, "— falling back to Odds API");
+  }
+
+  // Fallback: Odds API
   try {
     const props = await fetchPlayerProps();
     if (props.length > 0) {
       await saveProps(props);
-      await logRun("scrape", "success", props.length);
+      await logRun("scrape", "success", props.length, "fallback:odds-api");
+      console.log(`Got ${props.length} props from Odds API (fallback)`);
       return props;
     }
-    console.log("No props from Odds API — no games today or API issue");
-    await logRun("scrape", "empty", 0, "No props returned");
+    console.log("No props from either source — no games today or both APIs down");
+    await logRun("scrape", "empty", 0, "No props from PrizePicks or Odds API");
     return [];
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error("Props fetch failed:", msg);
+    console.error("Both sources failed:", msg);
     await logRun("scrape", "error", 0, msg);
     return [];
   }

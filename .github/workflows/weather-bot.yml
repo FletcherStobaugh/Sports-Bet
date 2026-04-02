@@ -1,0 +1,35 @@
+name: Weather Bot
+
+on:
+  schedule:
+    # Run at 10 AM ET (14:00 UTC) — markets are open, forecasts are fresh
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Bot mode: scan, dry-run, or trade"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - scan
+          - dry-run
+          - trade
+
+jobs:
+  weather-trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Run weather bot
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+        run: npx tsx scripts/run-weather-bot.ts ${{ github.event.inputs.mode || 'trade' }}

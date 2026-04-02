@@ -6,11 +6,20 @@ import { Configuration, MarketApi, OrdersApi, PortfolioApi, EventsApi } from "ka
 
 function getConfig(): Configuration {
   const apiKey = process.env.KALSHI_API_KEY;
-  const privateKey = process.env.KALSHI_PRIVATE_KEY;
+  let privateKey = process.env.KALSHI_PRIVATE_KEY;
 
-  if (!apiKey || !privateKey) {
-    throw new Error("KALSHI_API_KEY and KALSHI_PRIVATE_KEY must be set");
+  if (!privateKey) {
+    const keyPath = process.env.KALSHI_PRIVATE_KEY_PATH || "./kalshi-private-key.pem";
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      privateKey = fs.readFileSync(path.resolve(keyPath), "utf-8");
+    } catch {
+      throw new Error("KALSHI_PRIVATE_KEY not set and key file not found");
+    }
   }
+
+  if (!apiKey) throw new Error("KALSHI_API_KEY must be set");
 
   return new Configuration({
     apiKey,
