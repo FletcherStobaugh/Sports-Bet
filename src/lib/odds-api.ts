@@ -28,7 +28,6 @@ const MARKET_MAP: Record<string, StatCategory> = {
   player_points_assists: "pts+ast",
   player_rebounds_assists: "reb+ast",
   player_points_rebounds_assists: "pts+reb+ast",
-  player_steals_blocks: "stl+blk",
 };
 
 // All player prop markets we want
@@ -76,9 +75,19 @@ async function getEvents(): Promise<OddsEvent[]> {
 // Get player props for a specific event
 async function getEventPlayerProps(eventId: string): Promise<OddsEventWithOdds> {
   const markets = PROP_MARKETS.join(",");
-  const res = await fetch(
-    `${BASE_URL}/sports/${SPORT}/events/${eventId}/odds?apiKey=${getApiKey()}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=prizepicks,draftkings,fanduel,betmgm`
-  );
+  const url = `${BASE_URL}/sports/${SPORT}/events/${eventId}/odds?apiKey=${getApiKey()}&regions=us&markets=${markets}&oddsFormat=american`;
+  const res = await fetch(url);
+
+  if (res.status === 422) {
+    // Some markets might be invalid — try core markets only
+    console.log("    Retrying with core markets only...");
+    const coreMarkets = "player_points,player_rebounds,player_assists,player_threes";
+    const retryUrl = `${BASE_URL}/sports/${SPORT}/events/${eventId}/odds?apiKey=${getApiKey()}&regions=us&markets=${coreMarkets}&oddsFormat=american`;
+    const retry = await fetch(retryUrl);
+    if (!retry.ok) throw new Error(`Odds API props ${retry.status}: ${await retry.text()}`);
+    return retry.json();
+  }
+
   if (!res.ok) throw new Error(`Odds API props ${res.status}: ${await res.text()}`);
   return res.json();
 }
