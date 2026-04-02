@@ -27,3 +27,9 @@ Automated NBA player prop value finder for PrizePicks.
 - `DATABASE_URL` — Neon Postgres connection string
 - `BDL_API_KEY` — ball-dont-lie API key (optional for free tier)
 - `PIPELINE_SECRET` — protects pipeline API endpoints
+
+## Running Locally
+- `npm run dev` — start dev server
+- `DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/run-pipeline.ts analyze` — run analysis
+- `DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/run-pipeline.ts resolve` — resolve bets
+- `DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config scripts/init-db.ts` — init database
