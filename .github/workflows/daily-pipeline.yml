@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  scrape-analyze:
+  fetch-and-analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,9 +16,8 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm ci
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-      - name: Scrape PrizePicks and analyze props
+      - name: Fetch props and analyze
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: npx tsx scripts/run-pipeline.ts all

@@ -2,7 +2,8 @@
 // Entry point for GitHub Actions pipeline jobs
 
 import { neon } from "@neondatabase/serverless";
-import { scrapePrizePicks, generateSampleProps } from "../src/lib/scraper";
+import { fetchPlayerProps } from "../src/lib/odds-api";
+import { generateSampleProps } from "../src/lib/scraper";
 import { analyzeAllProps } from "../src/lib/analyzer";
 import { resolveBets } from "../src/lib/resolver";
 import type { ScrapedProp } from "../src/lib/types";
@@ -17,25 +18,23 @@ async function logRun(jobType: string, status: string, items: number, error?: st
 }
 
 async function scrape() {
-  console.log("=== SCRAPING PRIZEPICKS ===");
+  console.log("=== FETCHING PLAYER PROPS ===");
   try {
-    const props = await scrapePrizePicks();
+    const props = await fetchPlayerProps();
     if (props.length > 0) {
       await saveProps(props);
       await logRun("scrape", "success", props.length);
-      console.log(`Scraped ${props.length} props from PrizePicks`);
       return props;
     }
+    console.log("No props from Odds API — no games today or API issue");
+    await logRun("scrape", "empty", 0, "No props returned");
+    return [];
   } catch (err) {
-    console.error("Scraper failed:", err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    console.error("Props fetch failed:", msg);
+    await logRun("scrape", "error", 0, msg);
+    return [];
   }
-
-  // Fallback to sample data
-  console.log("PrizePicks scrape returned 0 props — using sample data");
-  const sample = generateSampleProps();
-  await saveProps(sample);
-  await logRun("scrape", "fallback", sample.length, "Used sample data");
-  return sample;
 }
 
 async function saveProps(props: ScrapedProp[]) {
@@ -54,23 +53,20 @@ async function analyze() {
   console.log("=== RUNNING ANALYSIS ===");
   const today = new Date().toISOString().split("T")[0];
 
-  // Get today's scraped props, or fall back to sample
   const dbProps = await sql`SELECT * FROM props WHERE date = ${today}`;
-  let propsToAnalyze: ScrapedProp[];
-
-  if (dbProps.length > 0) {
-    propsToAnalyze = dbProps.map((p) => ({
-      playerName: p.player_name as string,
-      statCategory: p.stat_category as ScrapedProp["statCategory"],
-      line: p.line as number,
-      gameInfo: p.game_info as string,
-      scrapedAt: p.scraped_at as string,
-    }));
-    console.log(`Found ${propsToAnalyze.length} props in DB for today`);
-  } else {
-    console.log("No props in DB for today, using sample data");
-    propsToAnalyze = generateSampleProps();
+  if (dbProps.length === 0) {
+    console.log("No props in DB for today — nothing to analyze");
+    return [];
   }
+
+  const propsToAnalyze: ScrapedProp[] = dbProps.map((p) => ({
+    playerName: p.player_name as string,
+    statCategory: p.stat_category as ScrapedProp["statCategory"],
+    line: p.line as number,
+    gameInfo: p.game_info as string,
+    scrapedAt: p.scraped_at as string,
+  }));
+  console.log(`Analyzing ${propsToAnalyze.length} props...`);
 
   try {
     const analyses = await analyzeAllProps(propsToAnalyze);
