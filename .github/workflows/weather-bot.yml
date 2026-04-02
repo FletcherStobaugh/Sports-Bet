@@ -27,6 +27,11 @@ jobs:
           node-version: "20"
       - name: Install dependencies
         run: npm ci
+      - name: Discover weather markets
+        env:
+          KALSHI_API_KEY: ${{ secrets.KALSHI_API_KEY }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+        run: npx tsx scripts/find-weather-markets.ts
       - name: Run weather bot
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
